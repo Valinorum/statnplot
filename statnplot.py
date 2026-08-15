@@ -23,27 +23,46 @@ def get_pvalues(df, x_col, y_col, hue_col, hue_order=None):
     """
     x_categories = df[x_col].unique()
     
+    # Check if the column data type is 'object'
+    if df[y_col].dtype == 'object':
+    # Convert text to numbers and change the type
+        df[y_col] = pd.to_numeric(df[y_col], errors='coerce')
+    
     if hue_order is None:
         hue_order = sorted(df[hue_col].unique())
     
     results = []
+    if len(df[hue_col].unique()) == 2:
+        data1 = df[(df[x_col] == x_categories[0])][y_col]
+        data2 = df[(df[x_col] == x_categories[1])][y_col]
+        if len(data1) > 1 and len(data2) > 1:
+            _, p_value = ttest_ind(data1, data2, equal_var=False)
+        else:
+            p_value = float('nan')
 
-    for x_cat in x_categories:
-        for hue1, hue2 in combinations(hue_order, 2):
-            data1 = df[(df[x_col] == x_cat) & (df[hue_col] == hue1)][y_col]
-            data2 = df[(df[x_col] == x_cat) & (df[hue_col] == hue2)][y_col]
+        results.append({
+            'group1': df[hue_col].unique()[0],
+            'group2': df[hue_col].unique()[1],
+            'p_value': p_value
+        })
+    else:
 
-            if len(data1) > 1 and len(data2) > 1:
-                _, p_value = ttest_ind(data1, data2, equal_var=False)
-            else:
-                p_value = float('nan')
-
-            results.append({
-                x_col: x_cat,
-                'group1': hue1,
-                'group2': hue2,
-                'p_value': p_value
-            })
+        for x_cat in x_categories:
+            for hue1, hue2 in combinations(hue_order, 2):
+                data1 = df[(df[x_col] == x_cat) & (df[hue_col] == hue1)][y_col]
+                data2 = df[(df[x_col] == x_cat) & (df[hue_col] == hue2)][y_col]
+    
+                if len(data1) > 1 and len(data2) > 1:
+                    _, p_value = ttest_ind(data1, data2, equal_var=False)
+                else:
+                    p_value = float('nan')
+    
+                results.append({
+                    x_col: x_cat,
+                    'group1': hue1,
+                    'group2': hue2,
+                    'p_value': p_value
+                })
             
     return pd.DataFrame(results)
 
@@ -115,6 +134,11 @@ def add_pvalue_annotations(df, x_col, y_col, hue_col, ax, hue_order=None, method
         hue_order (list, optional): Order for the hue categories.
         method (str): 'ttest' for independent t-tests or 'anova' for ANOVA + Tukey's HSD.
     """
+    # Check if the column data type is 'object'
+    if df[y_col].dtype == 'object':
+    # Convert text to numbers and change the type
+        df[y_col] = pd.to_numeric(df[y_col], errors='coerce')
+    
     if hue_order is None:
         hue_order = sorted(df[hue_col].unique())
     
@@ -122,32 +146,41 @@ def add_pvalue_annotations(df, x_col, y_col, hue_col, ax, hue_order=None, method
     hue_positions = {cat: i for i, cat in enumerate(hue_order)}
     dodge_width = 0.8
     bar_width = dodge_width / len(hue_order)
-
-    for i, x_cat in enumerate(x_categories):
-        y_max = df[df[x_col] == x_cat][y_col].max()
-        bar_height_offset = (df[y_col].max() - df[y_col].min()) * 0.05
-        current_y = y_max + bar_height_offset *1.5
-        top_annotation_y = current_y
-
-        # Get p-values based on the chosen method
-        if method == 'anova':
-            sub_df = df[df[x_col] == x_cat]
-            samples = [sub_df[sub_df[hue_col] == cat][y_col] for cat in hue_order]
-            if len([s for s in samples if len(s) > 1]) < 2: continue
-            _, p_val_anova = f_oneway(*samples)
-            if p_val_anova >= 0.05: continue
-            
-            tukey_results = pairwise_tukeyhsd(endog=sub_df[y_col], groups=sub_df[hue_col], alpha=0.05)
-            p_values_data = tukey_results._results_table.data
-            comparisons = [(p[0], p[1], p[-1]) for p in p_values_data[1:]]
-        else: # Default to t-test
-            comparisons = []
-            for hue1, hue2 in combinations(hue_order, 2):
-                data1 = df[(df[x_col] == x_cat) & (df[hue_col] == hue1)][y_col]
-                data2 = df[(df[x_col] == x_cat) & (df[hue_col] == hue2)][y_col]
-                if len(data1) > 1 and len(data2) > 1:
-                    _, p_val = ttest_ind(data1, data2, equal_var=False)
-                    comparisons.append((hue1, hue2, p_val))
+    
+    if len(df[hue_col].unique()) == 2:
+        comparisons = []
+        data1 = df[(df[x_col] == x_categories[0])][y_col]
+        data2 = df[(df[x_col] == x_categories[1])][y_col]
+        if len(data1) > 1 and len(data2) > 1:
+            _, p_value = ttest_ind(data1, data2, equal_var=False)
+            comparisons.append((data1, data2, p_value))
+            print('The P-value for this group is: ',p_value)
+    else:
+        for i, x_cat in enumerate(x_categories):
+            y_max = df[df[x_col] == x_cat][y_col].max()
+            bar_height_offset = (df[y_col].max() - df[y_col].min()) * 0.05
+            current_y = y_max + bar_height_offset *1.5
+            top_annotation_y = current_y
+    
+            # Get p-values based on the chosen method
+            if method == 'anova':
+                sub_df = df[df[x_col] == x_cat]
+                samples = [sub_df[sub_df[hue_col] == cat][y_col] for cat in hue_order]
+                if len([s for s in samples if len(s) > 1]) < 2: continue
+                _, p_val_anova = f_oneway(*samples)
+                if p_val_anova >= 0.05: continue
+                
+                tukey_results = pairwise_tukeyhsd(endog=sub_df[y_col], groups=sub_df[hue_col], alpha=0.05)
+                p_values_data = tukey_results._results_table.data
+                comparisons = [(p[0], p[1], p[-1]) for p in p_values_data[1:]]
+            else: # Default to t-test
+                comparisons = []
+                for hue1, hue2 in combinations(hue_order, 2):
+                    data1 = df[(df[x_col] == x_cat) & (df[hue_col] == hue1)][y_col]
+                    data2 = df[(df[x_col] == x_cat) & (df[hue_col] == hue2)][y_col]
+                    if len(data1) > 1 and len(data2) > 1:
+                        _, p_val = ttest_ind(data1, data2, equal_var=False)
+                        comparisons.append((hue1, hue2, p_val))
 
         # Add annotations
         for group1, group2, p_value in comparisons:
